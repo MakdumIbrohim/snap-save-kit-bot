@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { assertConfig, config } from "./config.js";
 import "./db.js";
 import { bot } from "./bot/index.js";
-import { sweepStaleTmp } from "./services/index.js";
+import { getRotatorStats, sweepStaleTmp } from "./services/index.js";
 
 function checkBinary(name: string, bin: string): boolean {
   try {
@@ -34,6 +34,7 @@ function checkBinary(name: string, bin: string): boolean {
 
 assertConfig();
 fs.mkdirSync(config.tmpDir, { recursive: true });
+fs.mkdirSync(config.cookies.dir, { recursive: true });
 sweepStaleTmp();
 
 // Jalankan pembersihan file sementara secara berkala (tiap 30 menit)
@@ -53,6 +54,13 @@ if (!okFfmpeg)
 if (config.accessMode === "whitelist") {
   console.log(
     `[init] mode whitelist: ${config.whitelistIds.size} user diizinkan + admin.`,
+  );
+}
+
+const rot = getRotatorStats();
+if (rot.proxyCount > 0 || Object.values(rot.cookieCounts).some((c) => c > 0)) {
+  console.log(
+    `[init] rotasi: ${rot.proxyCount} proxy | cookies: YT(${rot.cookieCounts.youtube ?? 0}) FB(${rot.cookieCounts.facebook ?? 0}) IG(${rot.cookieCounts.instagram ?? 0})`,
   );
 }
 

@@ -48,6 +48,13 @@ export const config = {
     windowSec: num("RATE_LIMIT_WINDOW_SEC", 60),
     maxRequests: num("RATE_LIMIT_MAX_REQUESTS", 5),
   },
+  proxies: process.env.PROXIES ?? process.env.PROXY_FILE ?? "",
+  cookies: {
+    dir: process.env.COOKIES_DIR ?? path.join(root, "data", "cookies"),
+    youtube: process.env.YOUTUBE_COOKIES_TXT ?? "",
+    facebook: process.env.FACEBOOK_COOKIES_TXT ?? "",
+    instagram: process.env.INSTAGRAM_COOKIES_TXT ?? "",
+  },
   youTubeCookies: process.env.YOUTUBE_COOKIES_TXT ?? "",
   facebookCookies: process.env.FACEBOOK_COOKIES_TXT ?? "",
   bin: {

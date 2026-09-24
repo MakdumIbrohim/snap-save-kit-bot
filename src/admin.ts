@@ -1,5 +1,6 @@
 import type { Bot, Context } from "grammy";
 import { config } from "./config.js";
+import { getRotatorStats } from "./services/index.js";
 import {
   effectiveDailyLimit,
   getAllActiveUserIds,
@@ -42,11 +43,16 @@ export function registerAdminCommands(
       const rate = s.requests24h
         ? Math.round((s.success24h / s.requests24h) * 100)
         : 0;
+      const rot = getRotatorStats();
+      const cookieSummary = Object.entries(rot.cookieCounts)
+        .map(([k, v]) => `${k.toUpperCase()}:${v}`)
+        .join(" ");
       const lines = [
         "📊 <b>Statistik 24 jam terakhir</b>",
         `Permintaan: ${s.requests24h} • Sukses: ${s.success24h} • Gagal: ${s.failed24h} (${rate}% sukses)`,
         `Pengguna aktif: ${s.activeUsers24h} • Rata-rata proses: ${s.avgMs ? Math.round(s.avgMs / 100) / 10 : "-"}s`,
         `Kuota harian aktif: ${effectiveDailyLimit()}`,
+        `Rotasi: ${rot.proxyCount} proxy • Cookies: ${cookieSummary || "-"}`,
         "",
         "<b>Per platform:</b>",
         ...(s.byPlatform.length

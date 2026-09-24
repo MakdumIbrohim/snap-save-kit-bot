@@ -5,6 +5,7 @@ import type { Platform } from "../platforms/index.js";
 import { getPlatformConfig } from "../platforms/index.js";
 import { fetchInstagramEmbedInfo } from "../platforms/instagram.js";
 import { fetchFacebookPhotoInfo } from "../platforms/facebook.js";
+import { getNextCookie, getNextProxy } from "./rotator.js";
 
 const pexecFile = promisify(execFile);
 
@@ -132,7 +133,12 @@ const IMAGE_EXTS = new Set([
 
 async function tryFetchImageInfo(url: string): Promise<VideoInfo | null> {
   try {
-    const args = ["-J", "--no-playlist", "--no-warnings", "--no-progress", url];
+    const args = ["-J", "--no-playlist", "--no-warnings", "--no-progress"];
+    const cookie = getNextCookie("instagram");
+    if (cookie) args.push("--cookies", cookie);
+    const proxy = getNextProxy();
+    if (proxy) args.push("--proxy", proxy);
+    args.push(url);
     const raw = await runYtDlp(args, INFO_TIMEOUT_MS);
     const data = JSON.parse(raw);
     const allImage =
@@ -183,11 +189,13 @@ export async function fetchInfo(
   }
 
   const args = ["-J", "--no-playlist", "--no-warnings", "--no-progress"];
-  if (config.youTubeCookies && platform === "youtube") {
-    args.push("--cookies", config.youTubeCookies);
+  const cookie = getNextCookie(platform);
+  if (cookie) {
+    args.push("--cookies", cookie);
   }
-  if (config.facebookCookies && platform === "facebook") {
-    args.push("--cookies", config.facebookCookies);
+  const proxy = getNextProxy();
+  if (proxy) {
+    args.push("--proxy", proxy);
   }
   args.push(url);
   console.log("[yt-dlp] fetchInfo:", url);

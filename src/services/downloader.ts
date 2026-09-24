@@ -6,6 +6,7 @@ import { config } from "../config.js";
 import { getPlatformConfig } from "../platforms/index.js";
 import type { VideoInfo } from "./extractor.js";
 import type { DownloadJob, JobResult } from "./queue.js";
+import { getNextCookie, getNextProxy } from "./rotator.js";
 
 export function availableHeights(info: VideoInfo): number[] {
   const set = new Set<number>();
@@ -102,59 +103,72 @@ function findOutputFile(dir: string): string | null {
   return files[0]?.f ?? null;
 }
 
+function applyRotation(args: string[], platform: string): void {
+  const targetPlat = platform === "spotify" ? "youtube" : platform;
+  const cookie = getNextCookie(targetPlat);
+  const proxy = getNextProxy();
+  const last = args.pop();
+  if (cookie && !args.includes("--cookies")) {
+    args.push("--cookies", cookie);
+  }
+  if (proxy && !args.includes("--proxy")) {
+    args.push("--proxy", proxy);
+  }
+  if (last !== undefined) {
+    args.push(last);
+  }
+}
+
 function buildArgs(job: DownloadJob, dir: string): string[] {
   const handler = getPlatformConfig(job.platform);
+  let args: string[] | null = null;
   if (handler?.buildDownloadArgs) {
-    const customArgs = handler.buildDownloadArgs(job, dir);
-    if (customArgs) return customArgs;
+    args = handler.buildDownloadArgs(job, dir);
   }
 
-  const out = path.join(dir, "%(id)s.%(ext)s");
-  const args = [
-    "--no-playlist",
-    "--no-warnings",
-    "--newline",
-    "--progress",
-    "--no-part",
-    "--restrict-filenames",
-    "-o",
-    out,
-  ];
-  if (path.isAbsolute(config.bin.ffmpeg)) {
-    args.push("--ffmpeg-location", config.bin.ffmpeg);
-  }
-  if (config.youTubeCookies && job.platform === "youtube") {
-    args.push("--cookies", config.youTubeCookies);
-  }
-  if (config.facebookCookies && job.platform === "facebook") {
-    args.push("--cookies", config.facebookCookies);
-  }
-  if (job.kind.type === "audio") {
-    args.push("-x", "--audio-format", "mp3", "--audio-quality", "5");
-  } else if (job.kind.type === "image") {
-    args.push("-f", "Image");
-  } else {
-    const h = job.kind.height;
-    if (h && h > 0) {
-      args.push(
-        "-f",
-        `bestvideo[height<=${h}]+bestaudio/best[height<=${h}]/best`,
-        "--merge-output-format",
-        "mp4",
-      );
-    } else {
-      // Format video tanpa tinggi eksplisit (misal TikTok, IG, FB)
-      args.push(
-        "-f",
-        "bestvideo+bestaudio/best",
-        "--merge-output-format",
-        "mp4",
-      );
+  if (!args) {
+    const out = path.join(dir, "%(id)s.%(ext)s");
+    args = [
+      "--no-playlist",
+      "--no-warnings",
+      "--newline",
+      "--progress",
+      "--no-part",
+      "--restrict-filenames",
+      "-o",
+      out,
+    ];
+    if (path.isAbsolute(config.bin.ffmpeg)) {
+      args.push("--ffmpeg-location", config.bin.ffmpeg);
     }
+    if (job.kind.type === "audio") {
+      args.push("-x", "--audio-format", "mp3", "--audio-quality", "5");
+    } else if (job.kind.type === "image") {
+      args.push("-f", "Image");
+    } else {
+      const h = job.kind.height;
+      if (h && h > 0) {
+        args.push(
+          "-f",
+          `bestvideo[height<=${h}]+bestaudio/best[height<=${h}]/best`,
+          "--merge-output-format",
+          "mp4",
+        );
+      } else {
+        args.push(
+          "-f",
+          "bestvideo+bestaudio/best",
+          "--merge-output-format",
+          "mp4",
+        );
+      }
+    }
+    const source =
+      job.info.formats[0]?.source || job.info.webpageUrl || job.info.id;
+    args.push(source);
   }
-  const source =
-    job.info.formats[0]?.source || job.info.webpageUrl || job.info.id;
-  args.push(source);
+
+  applyRotation(args, job.platform);
   return args;
 }
 

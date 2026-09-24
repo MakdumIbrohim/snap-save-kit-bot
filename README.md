@@ -13,7 +13,8 @@ Bot Telegram pengunduh video, audio, album foto, dan lagu multi-platform.
 - Pilihan unduh satu foto tertentu atau semua slide sekaligus (media group/album).
 - Fallback scraper mandiri untuk post foto Facebook dan Instagram yang gagal diproses oleh yt-dlp.
 - Perlindungan anti-spam / in-memory rate limiter per pengguna untuk mencegah overload server.
-- Dukungan autentikasi cookies (YouTube dan Facebook) untuk konten privat/login-wall.
+- Dukungan autentikasi & rotasi cookies pool (YouTube, Facebook, Instagram) untuk konten privat/login-wall.
+- Dukungan pool rotasi proxy (HTTP/SOCKS5) untuk mencegah blokir IP dan rate limit (403 Forbidden).
 
 **Alur:** Kirim link → lihat pratinjau (thumbnail/album slide, judul, uploader, format) → pilih format/foto → terima file.
 
@@ -214,8 +215,12 @@ MAX_UPLOAD_MB=50               # batas upload file Telegram (default 50 MB)
 CONCURRENCY=2                  # batas proses unduhan paralel
 QUEUE_TIMEOUT_SEC=900          # timeout proses per job (detik)
 PREVIEW_TTL_MIN=30             # masa berlaku tombol pilihan format (menit)
-YOUTUBE_COOKIES_TXT=           # path cookies.txt untuk YouTube age-restricted
-FACEBOOK_COOKIES_TXT=          # path cookies.txt untuk Facebook login-wall
+YOUTUBE_COOKIES_TXT=           # path file / folder cookies.txt YouTube
+FACEBOOK_COOKIES_TXT=          # path file / folder cookies.txt Facebook
+INSTAGRAM_COOKIES_TXT=         # path file / folder cookies.txt Instagram
+COOKIES_DIR=data/cookies       # folder pool cookies (berisi *.txt atau subfolder per platform)
+PROXIES=                       # daftar proxy pisah koma (http://..., socks5://...)
+PROXY_FILE=                    # atau path file daftar proxy (1 per baris)
 YTDLP_PATH=yt-dlp              # path binari yt-dlp jika custom
 FFMPEG_PATH=                   # path binari ffmpeg jika custom
 DB_PATH=data/snapkit.db        # lokasi file database SQLite
