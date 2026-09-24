@@ -1,6 +1,4 @@
 import type { ChildProcess } from "node:child_process";
-import PQueue from "p-queue";
-import { config } from "../config.js";
 import { consumeQuota, logEvent } from "../db.js";
 import type { Platform } from "../platforms/index.js";
 import type { VideoInfo } from "./extractor.js";
@@ -33,31 +31,39 @@ export type DownloadJob = {
 
 export type JobRunner = (
   job: DownloadJob,
-  report: (percent: number | null, stage: string) => void
+  report: (percent: number | null, stage: string) => void,
 ) => Promise<JobResult>;
 
-const queue = new PQueue({
-  concurrency: config.concurrency,
-  timeout: config.queueTimeoutSec * 1000,
-});
-
-const active = new Map<string, DownloadJob>();
+const activeByUser = new Map<number, DownloadJob>();
 
 let runner: JobRunner | null = null;
-let reporter: ((job: DownloadJob, percent: number | null, stage: string) => void) | null = null;
+let reporter:
+  | ((job: DownloadJob, percent: number | null, stage: string) => void)
+  | null = null;
 let counter = 0;
 
-export function initQueue(r: JobRunner, onProgress: (job: DownloadJob, percent: number | null, stage: string) => void): void {
+export function initQueue(
+  r: JobRunner,
+  onProgress: (job: DownloadJob, percent: number | null, stage: string) => void,
+): void {
   runner = r;
   reporter = onProgress;
 }
 
+export function hasActiveJob(userId: number): boolean {
+  return activeByUser.has(userId);
+}
+
+export function getActiveJob(userId: number): DownloadJob | undefined {
+  return activeByUser.get(userId);
+}
+
 export function queueDepth(): number {
-  return queue.size;
+  return 0;
 }
 
 export function queueRunning(): number {
-  return queue.pending;
+  return activeByUser.size;
 }
 
 export function cancelJob(job: DownloadJob): void {
@@ -71,7 +77,14 @@ export function cancelJob(job: DownloadJob): void {
   }
 }
 
-export function enqueue(params: {
+export function cancelUserJob(userId: number): boolean {
+  const job = activeByUser.get(userId);
+  if (!job) return false;
+  cancelJob(job);
+  return true;
+}
+
+export function startJob(params: {
   chatId: number;
   userId: number;
   platform: Platform;
@@ -79,7 +92,11 @@ export function enqueue(params: {
   info: VideoInfo;
   statusMessageId?: number;
 }): DownloadJob {
-  if (!runner || !reporter) throw new Error("queue belum diinisialisasi");
+  if (!runner || !reporter) throw new Error("job runner belum diinisialisasi");
+  if (activeByUser.has(params.userId)) {
+    throw new Error("Pengguna masih memiliki unduhan yang sedang berjalan");
+  }
+
   const id = `${Date.now().toString(36)}-${(++counter).toString(36)}`;
   let resolvePromise!: (r: JobResult) => void;
   const promise = new Promise<JobResult>((res) => {
@@ -95,36 +112,51 @@ export function enqueue(params: {
     info: params.info,
     statusMessageId: params.statusMessageId,
     queuedAt: Date.now(),
+    startedAt: Date.now(),
     cancelled: false,
     promise,
   };
 
-  active.set(id, job);
+  activeByUser.set(params.userId, job);
 
-  void queue.add(async () => {
-    if (job.cancelled) {
-      active.delete(id);
-      resolvePromise({ ok: false, code: "cancelled" });
-      return;
-    }
-    job.startedAt = Date.now();
+  void (async () => {
     try {
-      const res = await runner!(job, (pct, stage) => reporter!(job, pct, stage));
+      if (job.cancelled) {
+        resolvePromise({ ok: false, code: "cancelled" });
+        return;
+      }
+      const res = await runner!(job, (pct, stage) =>
+        reporter!(job, pct, stage),
+      );
       if (res.ok) {
         consumeQuota(job.userId);
         logEvent(job.userId, job.platform, job.kind.type, true);
       } else if (res.code === "too_big") {
-        logEvent(job.userId, job.platform, job.kind.type, false, `too_big: ${res.size}`);
+        logEvent(
+          job.userId,
+          job.platform,
+          job.kind.type,
+          false,
+          `too_big: ${res.size}`,
+        );
       }
       resolvePromise(res);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      logEvent(job.userId, job.platform, job.kind.type, false, msg.slice(0, 200));
+      logEvent(
+        job.userId,
+        job.platform,
+        job.kind.type,
+        false,
+        msg.slice(0, 200),
+      );
       resolvePromise({ ok: false, code: "error", message: msg });
     } finally {
-      active.delete(id);
+      activeByUser.delete(params.userId);
     }
-  });
+  })();
 
   return job;
 }
+
+export const enqueue = startJob;

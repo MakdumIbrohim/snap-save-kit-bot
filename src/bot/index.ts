@@ -10,11 +10,12 @@ import {
 } from "../platforms/index.js";
 import {
   ExtractError,
-  cancelJob,
+  cancelUserJob,
   enqueue,
   fetchInfo,
+  hasActiveJob,
   initQueue,
-  queueDepth,
+  queueRunning,
   runDownload,
   type DownloadJob,
   type VideoInfo,
@@ -28,17 +29,6 @@ export const bot = new Bot(config.botToken);
 
 // Daftarkan admin commands lebih awal sebelum message handler
 registerAdminCommands(bot, { isAdmin });
-
-const activeByChat = new Map<string, DownloadJob>();
-
-function jobKey(chatId: number, userId: number): string {
-  return `${chatId}:${userId}`;
-}
-
-function findActiveForChat(chatId: number, userId: number): DownloadJob[] {
-  const j = activeByChat.get(jobKey(chatId, userId));
-  return j && !j.cancelled ? [j] : [];
-}
 
 function describeError(err: unknown): string {
   if (err instanceof ExtractError) {
@@ -174,20 +164,16 @@ bot.command("status", async (ctx) => {
   ensureUser(userId, ctx.from?.username);
   const limit = effectiveDailyLimit();
   const used = quotaUsed(userId);
+  const active = hasActiveJob(userId);
   await ctx.reply(
-    `Kuota hari ini: ${used}/${limit}\nPosisi antrian saat ini: ${queueDepth()} job.\nMode akses: ${currentAccessMode()}.`,
+    `Kuota hari ini: ${used}/${limit}\nStatus proses: ${active ? "Sedang mengunduh ⏳" : "Siap menerima link"}\nUnduhan aktif sistem: ${queueRunning()}\nMode akses: ${currentAccessMode()}.`,
   );
 });
 
 bot.command("cancel", async (ctx) => {
   const from = ctx.from;
   if (!from) return;
-  const chatId = ctx.chat.id;
-  let cancelled = false;
-  for (const job of findActiveForChat(chatId, from.id)) {
-    cancelJob(job);
-    cancelled = true;
-  }
+  const cancelled = cancelUserJob(from.id);
   await ctx.reply(
     cancelled ? "Unduhan dibatalkan." : "Tidak ada unduhan aktif.",
   );
@@ -199,6 +185,12 @@ bot.on("message:text", async (ctx) => {
   if (text.startsWith("/")) return;
   const accessErr = checkAccess(ctx);
   if (accessErr) return ctx.reply(accessErr);
+
+  if (hasActiveJob(ctx.from.id)) {
+    return ctx.reply(
+      "⏳ Kamu masih memiliki unduhan yang sedang berjalan.\nHarap tunggu hingga selesai atau batalkan dengan /cancel sebelum mengirim link lain.",
+    );
+  }
 
   const url = extractUrl(text);
   if (!url)
@@ -299,6 +291,13 @@ bot.on("callback_query:data", async (ctx) => {
     });
   }
 
+  if (hasActiveJob(fromId)) {
+    return ctx.answerCallbackQuery({
+      text: "Unduhan kamu sebelumnya masih berjalan. Harap tunggu hingga selesai atau batalkan dengan /cancel.",
+      show_alert: true,
+    });
+  }
+
   let kindObj:
     | { type: "video"; height: number }
     | { type: "audio" }
@@ -317,14 +316,14 @@ bot.on("callback_query:data", async (ctx) => {
     kindObj = { type: "video", height: Number(heightStr) };
   }
 
-  await ctx.answerCallbackQuery({ text: "Masuk antrian pemrosesan…" });
+  await ctx.answerCallbackQuery({ text: "Memulai pemrosesan…" });
   const previewMsgId = (
     ctx.callbackQuery.message as { message_id?: number } | undefined
   )?.message_id;
   if (previewMsgId) {
     await ctx.api
       .editMessageCaption(chatId, previewMsgId, {
-        caption: `⏳ <b>Dimasukkan ke antrian…</b>\n${esc(p.info.title.slice(0, 120))}`,
+        caption: `⏳ <b>Sedang diproses…</b>\n${esc(p.info.title.slice(0, 120))}`,
         parse_mode: "HTML",
         reply_markup: new InlineKeyboard(),
       })
@@ -333,12 +332,9 @@ bot.on("callback_query:data", async (ctx) => {
 
   const status = await bot.api.sendMessage(
     chatId,
-    queueDepth() > 0
-      ? `⏳ Dalam antrian (${queueDepth()} job)…`
-      : "⏳ Mempersiapkan unduhan…",
+    "⏳ Mempersiapkan unduhan…",
   );
 
-  const key = jobKey(chatId, fromId);
   const job = enqueue({
     chatId,
     userId: fromId,
@@ -347,8 +343,6 @@ bot.on("callback_query:data", async (ctx) => {
     info: p.info,
     statusMessageId: status.message_id,
   });
-  activeByChat.set(key, job);
-  job.promise.finally(() => activeByChat.delete(key));
 
   const result = await job.promise;
   await handleJobResult(bot, chatId, job, result);
